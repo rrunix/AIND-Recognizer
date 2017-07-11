@@ -1,4 +1,4 @@
-from unittest import TestCase
+import unittest
 
 from asl_data import AslDb
 from my_model_selectors import (
@@ -7,7 +7,8 @@ from my_model_selectors import (
 
 FEATURES = ['right-y', 'right-x']
 
-class TestSelectors(TestCase):
+
+class TestSelectors(unittest.TestCase):
     def setUp(self):
         asl = AslDb()
         self.training = asl.build_training(FEATURES)
@@ -37,3 +38,7 @@ class TestSelectors(TestCase):
         self.assertGreaterEqual(model.n_components, 2)
         model = SelectorDIC(self.sequences, self.xlengths, 'TOY').select()
         self.assertGreaterEqual(model.n_components, 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

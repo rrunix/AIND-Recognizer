@@ -1,11 +1,15 @@
 import math
 import statistics
 import warnings
+import itertools
+import operator
 
 import numpy as np
 from hmmlearn.hmm import GaussianHMM
 from sklearn.model_selection import KFold
 from asl_utils import combine_sequences
+
+NEG_INF = float("-inf")
 
 
 class ModelSelector(object):
@@ -34,17 +38,22 @@ class ModelSelector(object):
     def base_model(self, num_states):
         # with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=DeprecationWarning)
-        # warnings.filterwarnings("ignore", category=RuntimeWarning)
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
         try:
             hmm_model = GaussianHMM(n_components=num_states, covariance_type="diag", n_iter=1000,
                                     random_state=self.random_state, verbose=False).fit(self.X, self.lengths)
             if self.verbose:
                 print("model created for {} with {} states".format(self.this_word, num_states))
             return hmm_model
-        except:
+        except Exception as e:
+            import traceback, sys
+            traceback.print_exc(file=sys.stdout)
             if self.verbose:
                 print("failure on {} with {} states".format(self.this_word, num_states))
             return None
+
+    def get_component_range(self):
+        return range(self.min_n_components, min(len(self.X), self.max_n_components + 1))
 
 
 class SelectorConstant(ModelSelector):
@@ -68,6 +77,16 @@ class SelectorBIC(ModelSelector):
     Bayesian information criteria: BIC = -2 * logL + p * logN
     """
 
+    def compute_bic(self, hmm_model):
+        try:
+            n = len(self.lengths)
+            logL = hmm_model.score(self.X, self.lengths)
+            logN = np.log(len(self.X))
+            p = n * n + 2 * n * len(self.X[0]) - 1
+            return -2 * logL + p * logN
+        except ValueError:
+            return float("-inf")
+
     def select(self):
         """ select the best model for self.this_word based on
         BIC score for n between self.min_n_components and self.max_n_components
@@ -76,8 +95,7 @@ class SelectorBIC(ModelSelector):
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        return max([self.base_model(n_components) for n_components in self.get_component_range()], key=self.compute_bic)
 
 
 class SelectorDIC(ModelSelector):
@@ -89,11 +107,26 @@ class SelectorDIC(ModelSelector):
     DIC = log(P(X(i)) - 1/(M-1)SUM(log(P(X(all but i))
     '''
 
+    def score(self, hmm):
+        try:
+            return hmm.score(self.X, self.lengths)
+        except ValueError:
+            return float("-inf")
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        hmms = [self.base_model(n_components) for n_components in self.get_component_range()]
+
+        log_scores = np.array([self.score(hmm) for hmm in hmms])
+
+        mean = log_scores.mean()
+        num_scores = log_scores.shape[0]
+        log_scores_means = np.array(list(map(lambda x: (num_scores * mean - x) / (num_scores - 1), log_scores)))
+
+        dic_score = log_scores - log_scores_means
+
+        return hmms[np.argmax(dic_score)]
 
 
 class SelectorCV(ModelSelector):
@@ -101,8 +134,29 @@ class SelectorCV(ModelSelector):
 
     '''
 
+    @staticmethod
+    def score(hmm: GaussianHMM, x, lengths):
+        return hmm.score(x, lengths)
+
+    def compute_cv(self, hmm: GaussianHMM):
+        try:
+            if hmm.n_components == 1:
+                return self.score(hmm, self.X, self.lengths)
+
+            else:
+                n_splits = min(3, len(self.lengths))
+                sequences = KFold(n_splits=n_splits).split(self.sequences)
+
+                scores = [self.score(self.base_model(hmm.n_components), *combine_sequences(cv_train_idx, self.sequences))
+                          for cv_train_idx, _ in sequences]
+
+                if scores:
+                    return sum(scores) / len(scores)
+        except:
+            return float("-inf")
+
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        # TODO implement model selection using CV
-        raise NotImplementedError
+        return max(
+            [self.base_model(n_components) for n_components in self.get_component_range()], key=self.compute_cv)

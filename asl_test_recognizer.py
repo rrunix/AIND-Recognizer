@@ -1,4 +1,4 @@
-from unittest import TestCase
+import unittest
 
 from asl_data import AslDb
 from asl_utils import train_all_words
@@ -7,7 +7,7 @@ from my_recognizer import recognize
 
 FEATURES = ['right-y', 'right-x']
 
-class TestRecognize(TestCase):
+class TestRecognize(unittest.TestCase):
     def setUp(self):
         self.asl = AslDb()
         self.training_set = self.asl.build_training(FEATURES)
@@ -26,3 +26,6 @@ class TestRecognize(TestCase):
         self.assertIsInstance(guesses[0], str, "The guesses are not strings")
         self.assertIsInstance(guesses[-1], str, "The guesses are not strings")
 
+
+if __name__ == "__main__":
+    unittest.main()
