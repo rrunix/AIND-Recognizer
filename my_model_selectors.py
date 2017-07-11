@@ -77,7 +77,7 @@ class SelectorBIC(ModelSelector):
     Bayesian information criteria: BIC = -2 * logL + p * logN
     """
 
-    def compute_bic(self, hmm_model):
+    def score(self, hmm_model):
         try:
             n = len(self.lengths)
             logL = hmm_model.score(self.X, self.lengths)
@@ -95,7 +95,9 @@ class SelectorBIC(ModelSelector):
         """
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-        return max([self.base_model(n_components) for n_components in self.get_component_range()], key=self.compute_bic)
+        # Create the models, compute the score using BIC criteria and then get the one with lowest score.
+        # (less is better)
+        return min([self.base_model(n_components) for n_components in self.get_component_range()], key=self.score)
 
 
 class SelectorDIC(ModelSelector):
@@ -116,15 +118,17 @@ class SelectorDIC(ModelSelector):
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
+        # Create the hmms
         hmms = [self.base_model(n_components) for n_components in self.get_component_range()]
 
+        # Compute the score
         log_scores = np.array([self.score(hmm) for hmm in hmms])
 
-        mean = log_scores.mean()
-        num_scores = log_scores.shape[0]
-        log_scores_means = np.array(list(map(lambda x: (num_scores * mean - x) / (num_scores - 1), log_scores)))
+        # Calculate the term SUM(log(P(X(all but i)).
+        scores_sum = log_scores.sum()
+        log_scores_sum = np.array(list(map(lambda x: scores_sum - x, log_scores)))
 
-        dic_score = log_scores - log_scores_means
+        dic_score = log_scores - 1 / log_scores_sum.mean()
 
         return hmms[np.argmax(dic_score)]
 
@@ -140,20 +144,20 @@ class SelectorCV(ModelSelector):
 
     def compute_cv(self, hmm: GaussianHMM):
         try:
-            if hmm.n_components == 1:
-                return self.score(hmm, self.X, self.lengths)
+            n_splits = min(3, len(self.lengths))
+            sequences = KFold(n_splits=n_splits).split(self.sequences)
 
-            else:
-                n_splits = min(3, len(self.lengths))
-                sequences = KFold(n_splits=n_splits).split(self.sequences)
+            # Calculate the score for all the splits
+            scores = [self.score(self.base_model(hmm.n_components), *combine_sequences(cv_train_idx, self.sequences))
+                      for cv_train_idx, _ in sequences]
 
-                scores = [self.score(self.base_model(hmm.n_components), *combine_sequences(cv_train_idx, self.sequences))
-                          for cv_train_idx, _ in sequences]
-
-                if scores:
-                    return sum(scores) / len(scores)
+            if scores:
+                # Compute mean
+                return sum(scores) / len(scores)
         except:
-            return float("-inf")
+            pass
+
+        return float("-inf")
 
     def select(self):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
